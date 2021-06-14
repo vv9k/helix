@@ -13,13 +13,24 @@ use std::{
 use once_cell::sync::{Lazy, OnceCell};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
 pub struct Configuration {
+    pub global: GlobalConfiguration,
+    pub languages: LanguagesConfiguration,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LanguagesConfiguration {
     pub language: Vec<LanguageConfiguration>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct GlobalConfiguration {
+    pub theme: Option<String>,
+}
+
 // largely based on tree-sitter/cli/src/loader.rs
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct LanguageConfiguration {
     #[serde(rename = "name")]
@@ -36,7 +47,7 @@ pub struct LanguageConfiguration {
     // first_line_regex
     //
     #[serde(skip)]
-    pub(crate) highlight_config: OnceCell<Option<Arc<HighlightConfiguration>>>,
+    pub(crate) highlight_config: Option<Arc<HighlightConfiguration>>,
     // tags_config OnceCell<> https://github.com/tree-sitter/tree-sitter/pull/583
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language_server: Option<LanguageServerConfiguration>,
@@ -47,7 +58,7 @@ pub struct LanguageConfiguration {
     pub(crate) indent_query: OnceCell<Option<IndentQuery>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct LanguageServerConfiguration {
     pub command: String,
@@ -56,14 +67,14 @@ pub struct LanguageServerConfiguration {
     pub args: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct IndentationConfiguration {
     pub tab_width: usize,
     pub unit: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct IndentQuery {
     #[serde(default)]
@@ -143,35 +154,33 @@ fn read_query(language: &str, filename: &str) -> String {
 }
 
 impl LanguageConfiguration {
-    pub fn highlight_config(&self, scopes: &[String]) -> Option<Arc<HighlightConfiguration>> {
-        self.highlight_config
-            .get_or_init(|| {
-                let language = get_language_name(self.language_id).to_ascii_lowercase();
+    pub fn set_highlight_config(&mut self, scopes: &[String]) {
+        let language = get_language_name(self.language_id).to_ascii_lowercase();
 
-                let highlights_query = read_query(&language, "highlights.scm");
-                // always highlight syntax errors
-                // highlights_query += "\n(ERROR) @error";
+        let highlights_query = read_query(&language, "highlights.scm");
+        // always highlight syntax errors
+        // highlights_query += "\n(ERROR) @error";
 
-                let injections_query = read_query(&language, "injections.scm");
+        let injections_query = read_query(&language, "injections.scm");
 
-                let locals_query = "";
+        let locals_query = "";
 
-                if highlights_query.is_empty() {
-                    None
-                } else {
-                    let language = get_language(self.language_id);
-                    let mut config = HighlightConfiguration::new(
-                        language,
-                        &highlights_query,
-                        &injections_query,
-                        locals_query,
-                    )
-                    .unwrap(); // TODO: no unwrap
-                    config.configure(scopes);
-                    Some(Arc::new(config))
-                }
-            })
-            .clone()
+        if !highlights_query.is_empty() {
+            let language = get_language(self.language_id);
+            let mut config = HighlightConfiguration::new(
+                language,
+                &highlights_query,
+                &injections_query,
+                locals_query,
+            )
+            .unwrap(); // TODO: no unwrap
+            config.configure(scopes);
+            self.highlight_config = Some(Arc::new(config))
+        }
+    }
+
+    pub fn highlight_config(&self) -> Option<Arc<HighlightConfiguration>> {
+        self.highlight_config.clone()
     }
 
     pub fn indent_query(&self) -> Option<&IndentQuery> {
@@ -195,6 +204,7 @@ pub static LOADER: OnceCell<Loader> = OnceCell::new();
 #[derive(Debug)]
 pub struct Loader {
     // highlight_names ?
+    global_config: Arc<GlobalConfiguration>,
     language_configs: Vec<Arc<LanguageConfiguration>>,
     language_config_ids_by_file_type: HashMap<String, usize>, // Vec<usize>
     scopes: Vec<String>,
@@ -203,12 +213,13 @@ pub struct Loader {
 impl Loader {
     pub fn new(config: Configuration, scopes: Vec<String>) -> Self {
         let mut loader = Self {
+            global_config: Arc::new(config.global),
             language_configs: Vec::new(),
             language_config_ids_by_file_type: HashMap::new(),
             scopes,
         };
 
-        for config in config.language {
+        for config in config.languages.language {
             // get the next id
             let language_id = loader.language_configs.len();
 
@@ -227,6 +238,10 @@ impl Loader {
 
     pub fn scopes(&self) -> &[String] {
         &self.scopes
+    }
+
+    pub fn global_config(&self) -> &GlobalConfiguration {
+        self.global_config.as_ref()
     }
 
     pub fn language_config_for_file_name(&self, path: &Path) -> Option<Arc<LanguageConfiguration>> {

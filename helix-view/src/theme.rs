@@ -86,7 +86,7 @@ pub use tui::style::{Color, Modifier, Style};
 // }
 
 /// Color theme for syntax highlighting.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Theme {
     scopes: Vec<String>,
     styles: HashMap<String, Style>,

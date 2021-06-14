@@ -83,7 +83,12 @@ fn parse<'a>(contents: &'a str, theme: Option<&Theme>) -> tui::text::Text<'a> {
                             .get()
                             .unwrap()
                             .language_config_for_scope(&format!("source.{}", language))
-                            .and_then(|config| config.highlight_config(theme.scopes()))
+                            .and_then(|mut config| {
+                                if let Some(config) = std::sync::Arc::get_mut(&mut config) {
+                                    config.set_highlight_config(theme.scopes());
+                                }
+                                config.highlight_config()
+                            })
                             .map(|config| Syntax::new(&rope, config));
 
                         if let Some(mut syntax) = syntax {

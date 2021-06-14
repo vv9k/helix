@@ -953,6 +953,7 @@ mod cmd {
         }
         let autofmt = doc
             .language_config()
+            .as_ref()
             .map(|config| config.auto_format)
             .unwrap_or_default();
         if autofmt {
@@ -1100,6 +1101,20 @@ mod cmd {
         _quit_all(editor, args, event, true)
     }
 
+    fn theme(editor: &mut Editor, args: &[&str], event: PromptEvent) {
+        let theme = match args.first() {
+            Some(theme) => theme,
+            None => {
+                editor.set_error("enter a name of a theme to set".into());
+                return;
+            }
+        };
+
+        if !editor.set_theme(theme) {
+            editor.set_error(format!("theme `{}` not found", theme));
+        }
+    }
+
     pub const COMMAND_LIST: &[Command] = &[
         Command {
             name: "quit",
@@ -1155,6 +1170,13 @@ mod cmd {
             alias: Some("lat"),
             doc: "Jump to a later point in edit history. Accepts a number of steps or a time span.",
             fun: later,
+            completer: None,
+        },
+        Command {
+            name: "theme",
+            alias: None,
+            doc: "Change the theme of current view. Accepts a theme name as argument (:theme default)",
+            fun: theme,
             completer: None,
         },
         Command {
@@ -1457,7 +1479,7 @@ fn open(cx: &mut Context, open: Open) {
 
             // TODO: share logic with insert_newline for indentation
             let indent_level = indent::suggested_indent_for_pos(
-                doc.language_config(),
+                doc.language_config().as_ref(),
                 doc.syntax(),
                 text,
                 index,
@@ -2065,7 +2087,7 @@ pub mod insert {
 
             // TODO: offset range.head by 1? when calculating?
             let indent_level = indent::suggested_indent_for_pos(
-                doc.language_config(),
+                doc.language_config().as_ref(),
                 doc.syntax(),
                 text,
                 pos.saturating_sub(1),

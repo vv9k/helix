@@ -35,7 +35,7 @@ pub struct Document {
 
     syntax: Option<Syntax>,
     // /// Corresponding language scope name. Usually `source.<lang>`.
-    pub(crate) language: Option<Arc<LanguageConfiguration>>,
+    pub(crate) language: Option<LanguageConfiguration>,
 
     /// Pending changes since last history commit.
     changes: ChangeSet,
@@ -284,7 +284,10 @@ impl Document {
         scopes: &[String],
     ) {
         if let Some(language_config) = language_config {
-            if let Some(highlight_config) = language_config.highlight_config(scopes) {
+            let mut language_config = language_config.as_ref().clone();
+            language_config.set_highlight_config(scopes);
+
+            if let Some(highlight_config) = language_config.highlight_config() {
                 let syntax = Syntax::new(&self.text, highlight_config);
                 self.syntax = Some(syntax);
                 // TODO: config.configure(scopes) is now delayed, is that ok?
@@ -479,8 +482,8 @@ impl Document {
     }
 
     #[inline]
-    pub fn language_config(&self) -> Option<&LanguageConfiguration> {
-        self.language.as_deref()
+    pub fn language_config(&self) -> &Option<LanguageConfiguration> {
+        &self.language
     }
 
     #[inline]

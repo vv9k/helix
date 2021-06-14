@@ -1,13 +1,69 @@
 use crate::{theme::Theme, tree::Tree, Document, DocumentId, RegisterSelection, View, ViewId};
+use helix_core::syntax::{Configuration, GlobalConfiguration, LanguagesConfiguration, LOADER};
 use tui::layout::Rect;
 
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
+use once_cell::sync;
 use slotmap::SlotMap;
 
 use anyhow::Error;
 
 pub use helix_core::diagnostic::Severity;
+
+pub static THEMES: sync::Lazy<HashMap<String, Theme>> = sync::Lazy::new(init_themes);
+
+fn init_themes() -> HashMap<String, Theme> {
+    let mut themes = HashMap::new();
+    let default = include_bytes!("../../theme.toml");
+    themes.insert(
+        "default".into(),
+        toml::from_slice(default).expect("Could not parse default theme"),
+    );
+    let theme_dir = helix_core::config_dir().join("themes");
+    if theme_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&theme_dir) {
+            for entry in entries {
+                match entry {
+                    Ok(entry) => {
+                        let path = entry.path();
+                        if let Some(ext) = path.extension() {
+                            if ext != "toml" {
+                                continue;
+                            }
+                            if let Some(filename) = path.file_name() {
+                                let filename = filename.to_string_lossy().to_string();
+                                let data = match std::fs::read(&path) {
+                                    Ok(data) => data,
+                                    Err(e) => {
+                                        log::warn!(
+                                            "Could not read theme from `{}` - {}",
+                                            path.display(),
+                                            e
+                                        );
+                                        continue;
+                                    }
+                                };
+                                let theme = if let Ok(theme) =
+                                    toml::from_slice::<Theme>(data.as_slice())
+                                {
+                                    theme
+                                } else {
+                                    log::warn!("Could not parse theme from `{}`", path.display());
+                                    continue;
+                                };
+                                themes.insert(filename.trim_end_matches(".toml").into(), theme);
+                            }
+                        }
+                    }
+                    Err(e) => log::error!("Could not parse theme - {}", e),
+                }
+            }
+        }
+    }
+
+    themes
+}
 
 #[derive(Debug)]
 pub struct Editor {
@@ -30,25 +86,41 @@ pub enum Action {
 
 impl Editor {
     pub fn new(mut area: tui::layout::Rect) -> Self {
-        use helix_core::config_dir;
-        let config = std::fs::read(config_dir().join("theme.toml"));
-        // load $HOME/.config/helix/theme.toml, fallback to default config
-        let toml = config
-            .as_deref()
-            .unwrap_or(include_bytes!("../../theme.toml"));
-        let theme: Theme = toml::from_slice(toml).expect("failed to parse theme.toml");
-
+        let config_dir = helix_core::config_dir();
         // initialize language registry
-        use helix_core::syntax::{Loader, LOADER};
+        use helix_core::syntax::Loader;
 
         // load $HOME/.config/helix/languages.toml, fallback to default config
-        let config = std::fs::read(helix_core::config_dir().join("languages.toml"));
-        let toml = config
+        let languages_data = std::fs::read(config_dir.join("languages.toml"));
+        let languages_toml = languages_data
             .as_deref()
             .unwrap_or(include_bytes!("../../languages.toml"));
+        let languages: LanguagesConfiguration =
+            toml::from_slice(languages_toml).expect("Could not parse languages.toml");
 
-        let config = toml::from_slice(toml).expect("Could not parse languages.toml");
-        LOADER.get_or_init(|| Loader::new(config, theme.scopes().to_vec()));
+        let config_path = config_dir.join("config.toml");
+        let global = if config_path.exists() {
+            std::fs::read(config_path)
+                .map(|config| {
+                    toml::from_slice(config.as_slice()).expect("Could not parse config.toml")
+                })
+                .unwrap_or_else(|_| GlobalConfiguration { theme: None })
+        } else {
+            GlobalConfiguration { theme: None }
+        };
+
+        let theme = if let Some(theme) = &global.theme {
+            THEMES
+                .get(theme)
+                .unwrap_or_else(|| THEMES.get("default").unwrap()) // default should always be there)
+        } else {
+            THEMES.get("default").unwrap()
+        }
+        .clone();
+
+        LOADER.get_or_init(|| {
+            Loader::new(Configuration { global, languages }, theme.scopes().to_vec())
+        });
 
         let language_servers = helix_lsp::Registry::new();
 
@@ -83,6 +155,27 @@ impl Editor {
             let doc = &self.documents[view.doc];
             view.ensure_cursor_in_view(doc)
         }
+    }
+
+    /// Sets the theme of this editor to `theme` if such theme exists and returns `true`,
+    /// otherwise returns false
+    pub fn set_theme<S: AsRef<str>>(&mut self, theme: S) -> bool {
+        if let Some(theme) = THEMES.get(theme.as_ref()) {
+            self.theme = theme.to_owned();
+            let (_, doc) = self.current();
+            let loader = LOADER.get().unwrap();
+            let path = if let Some(path) = doc.path() {
+                path.to_path_buf()
+            } else {
+                return false;
+            };
+
+            doc.set_language(loader.language_config_for_file_name(&path), theme.scopes());
+            self._refresh();
+            return true;
+        }
+
+        false
     }
 
     pub fn switch(&mut self, id: DocumentId, action: Action) {

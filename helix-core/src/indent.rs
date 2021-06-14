@@ -251,26 +251,30 @@ where
 
         let doc = Rope::from(doc);
         use crate::syntax::{
-            Configuration, IndentationConfiguration, Lang, LanguageConfiguration, Loader,
+            Configuration, GlobalConfiguration, IndentationConfiguration, Lang,
+            LanguageConfiguration, LanguagesConfiguration, Loader,
         };
         use once_cell::sync::OnceCell;
         let loader = Loader::new(
             Configuration {
-                language: vec![LanguageConfiguration {
-                    scope: "source.rust".to_string(),
-                    file_types: vec!["rs".to_string()],
-                    language_id: Lang::Rust,
-                    highlight_config: OnceCell::new(),
-                    //
-                    roots: vec![],
-                    auto_format: false,
-                    language_server: None,
-                    indent: Some(IndentationConfiguration {
-                        tab_width: 4,
-                        unit: String::from("    "),
-                    }),
-                    indent_query: OnceCell::new(),
-                }],
+                languages: LanguagesConfiguration {
+                    language: vec![LanguageConfiguration {
+                        scope: "source.rust".to_string(),
+                        file_types: vec!["rs".to_string()],
+                        language_id: Lang::Rust,
+                        highlight_config: None,
+                        //
+                        roots: vec![],
+                        auto_format: false,
+                        language_server: None,
+                        indent: Some(IndentationConfiguration {
+                            tab_width: 4,
+                            unit: String::from("    "),
+                        }),
+                        indent_query: OnceCell::new(),
+                    }],
+                },
+                global: GlobalConfiguration { theme: None },
             },
             Vec::new(),
         );
@@ -281,7 +285,7 @@ where
         std::env::set_var("HELIX_RUNTIME", runtime.to_str().unwrap());
 
         let language_config = loader.language_config_for_scope("source.rust").unwrap();
-        let highlight_config = language_config.highlight_config(&[]).unwrap();
+        let highlight_config = language_config.highlight_config().unwrap();
         let syntax = Syntax::new(&doc, highlight_config.clone());
         let text = doc.slice(..);
         let tab_width = 4;

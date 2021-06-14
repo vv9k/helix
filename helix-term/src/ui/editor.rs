@@ -236,9 +236,12 @@ impl EditorView {
                 let end = text.line_to_char(last_line + 1);
                 Range::new(start, end)
             };
-            let cursor_style = Style::default()
-                // .bg(Color::Rgb(255, 255, 255))
-                .add_modifier(Modifier::REVERSED);
+            let cursor_style = match doc.mode {
+                Mode::Insert => Style::default()
+                    .add_modifier(Modifier::REVERSED)
+                    .add_modifier(Modifier::SLOW_BLINK),
+                _ => Style::default().add_modifier(Modifier::REVERSED),
+            };
 
             // let selection_style = Style::default().bg(Color::Rgb(94, 0, 128));
             let selection_style = Style::default().bg(Color::Rgb(84, 0, 153));
